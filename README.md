@@ -80,7 +80,19 @@ Click **Send Traced Request** to make a request through the Lab Service, Target 
 
 Select **Simulate a failure in Target Service before the MongoDB insert** to make MongoDB reject an invalid query. The Target responds with HTTP 503 and the Lab responds with HTTP 502. Automatic instrumentation may mark the failed MongoDB operation and the HTTP 5xx spans as errors. The failure does not insert a MongoDB record.
 
-The tracing lab also writes structured request logs. Run `docker compose logs resilience-lab-service resilience-target-service` to see JSON lines with the same `traceId` across both services. In Jaeger, open a `/trace-demo` trace and expand its Lab and Target spans to see the matching messages under **Events** (called **Logs** in some Jaeger versions). These are span events attached to the trace; Jaeger is not the central store for the container logs.
+The tracing lab writes structured manual request logs. Every line has `logType: "manual"`, a descriptive `message`, and the same `traceId` across both services. In Jaeger, open a `/trace-demo` trace and expand its Lab and Target spans to see the matching messages under **Events** (called **Logs** in some Jaeger versions). These are span events attached to the trace; Jaeger is not the central store for the container logs.
+
+## Centralized logging lab
+
+Loki stores the application logs, Promtail collects the Docker container output and sends it to Loki, and Grafana reads the stored logs. Open the [Trace Demo Logs dashboard](http://localhost:3001/d/trace-demo-logs/trace-demo-logs) in Grafana after sending a traced request. It shows only manual logs from the Lab and Target services.
+
+To investigate manually, open Grafana **Explore**, choose the **Loki** data source, and run:
+
+```logql
+{service=~"resilience-(lab|target)-service", log_type="manual"} | json
+```
+
+The `service` and `level` labels are safe for filtering. The trace ID stays inside the JSON log line instead of becoming a Loki label, because a different trace ID for every request would create too many labels. Copy a `traceId` from a log line and use it in Jaeger's **Lookup by Trace ID** field to move from the log to the complete request trace.
 
 ## OpenTelemetry metrics lab
 

@@ -1,0 +1,33 @@
+{
+  "uid": "trace-demo-logs",
+  "title": "Trace Demo Logs",
+  "tags": ["observability", "loki", "logs"],
+  "timezone": "browser",
+  "refresh": "2s",
+  "time": { "from": "now-15m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "logs",
+      "title": "Manual application logs",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 20, "w": 24, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{service=~\"resilience-(lab|target)-service\", log_type=\"manual\"} | json"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": true,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Descending"
+      }
+    }
+  ],
+  "schemaVersion": 41,
+  "version": 1
+}
