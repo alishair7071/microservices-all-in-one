@@ -1,17 +1,19 @@
-const { MongoClient } = require('mongodb');
+const { MongoClient, MongoError } = require('mongodb');
 const { logTraceEvent } = require('./correlated-logger');
+const { recordDemoRequest, recordMongoError } = require('./demo-metrics');
 
 const mongoClient = new MongoClient('mongodb://mongo:27017', { serverSelectionTimeoutMS: 3000 });
 
 async function handleTraceDemo(request, response) {
-  let record;
-  let error;
-  const failTarget = request.headers['x-demo-fail-target'] === '1';
-  logTraceEvent('info', 'target.request.received', { failTarget });
+  const startedAt = process.hrtime.bigint();
+  let statusCode = 500;
 
   try {
+    const failTarget = request.headers['x-demo-fail-target'] === '1';
+    logTraceEvent('info', 'target.request.received', { failTarget });
     await mongoClient.connect();
     const collection = mongoClient.db('resilience_trace_db').collection('requests');
+    let record;
 
     if (failTarget) {
       // MongoDB rejects this query, so its auto-instrumented operation records a real error.
@@ -24,15 +26,26 @@ async function handleTraceDemo(request, response) {
       record = { id: saved._id.toString(), createdAt: saved.createdAt.toISOString() };
       logTraceEvent('info', 'target.mongodb.record.read', { recordId: record.id });
     }
+    statusCode = 200;
+    logTraceEvent('info', 'target.response.sent', { statusCode });
+    response.writeHead(statusCode, { 'Content-Type': 'application/json' });
+    response.end(JSON.stringify({ record, error: null }));
   } catch (problem) {
-    error = problem.message;
-    logTraceEvent('error', 'target.mongodb.failed', { error });
+    const error = problem instanceof Error ? problem.message : String(problem);
+    const mongoFailure = problem instanceof MongoError;
+    if (mongoFailure) recordMongoError();
+    statusCode = mongoFailure ? 503 : 500;
+    logTraceEvent('error', mongoFailure ? 'target.mongodb.failed' : 'target.request.failed', { error });
+    logTraceEvent('error', 'target.response.sent', { statusCode });
+    if (!response.headersSent) {
+      response.writeHead(statusCode, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({ record: null, error }));
+    } else {
+      response.destroy();
+    }
+  } finally {
+    recordDemoRequest(startedAt, statusCode);
   }
-
-  const statusCode = error ? 503 : 200;
-  logTraceEvent(error ? 'error' : 'info', 'target.response.sent', { statusCode });
-  response.writeHead(statusCode, { 'Content-Type': 'application/json' });
-  response.end(JSON.stringify({ record, error }));
 }
 
 module.exports = { handleTraceDemo };

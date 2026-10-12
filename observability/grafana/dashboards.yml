@@ -1,0 +1,9 @@
+apiVersion: 1
+
+providers:
+  - name: Microservices Demo
+    orgId: 1
+    folder: Microservices Demo
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards

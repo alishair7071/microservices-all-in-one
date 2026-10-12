@@ -1,0 +1,56 @@
+{
+  "uid": "trace-demo-metrics",
+  "title": "Trace Demo Metrics — Basics",
+  "tags": ["microservices", "observability", "learning"],
+  "timezone": "browser",
+  "schemaVersion": 41,
+  "version": 2,
+  "refresh": "2s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "1. Completed requests",
+      "description": "A rising line means a request completed. The legend identifies the service and whether it succeeded or failed.",
+      "gridPos": { "x": 0, "y": 0, "w": 8, "h": 9 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum by (job, outcome) (trace_demo_requests_total{route=\"/trace-demo\"})", "legendFormat": "{{job}} · {{outcome}}" }],
+      "fieldConfig": { "defaults": { "min": 0, "unit": "short" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "2. Failed requests",
+      "description": "This counts only failed POST /trace-demo requests. A normal request should not change this graph.",
+      "gridPos": { "x": 8, "y": 0, "w": 8, "h": 9 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum by (job) (trace_demo_requests_total{route=\"/trace-demo\",outcome=\"error\"})", "legendFormat": "{{job}}" }],
+      "fieldConfig": { "defaults": { "min": 0, "unit": "short" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "3. Request duration p95",
+      "description": "Response speed over the last minute. Lower is faster. The value is in seconds.",
+      "gridPos": { "x": 16, "y": 0, "w": 8, "h": 9 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "histogram_quantile(0.95, sum by (job, le) (rate(trace_demo_duration_seconds_bucket{route=\"/trace-demo\"}[1m])))", "legendFormat": "{{job}}" }],
+      "fieldConfig": { "defaults": { "min": 0, "unit": "s" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "4. Request rate",
+      "description": "Completed /trace-demo requests per second over the last minute. This is observed throughput, not the maximum capacity of the service.",
+      "gridPos": { "x": 0, "y": 9, "w": 12, "h": 9 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum by (job) (rate(trace_demo_requests_total{route=\"/trace-demo\"}[1m]))", "legendFormat": "{{job}}" }],
+      "fieldConfig": { "defaults": { "min": 0, "unit": "reqps" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } }
+    }
+  ]
+}
