@@ -626,3 +626,74 @@ document.querySelector('#withdraw-account-money').addEventListener('click', () =
 
 Promise.all([loadProducts(), loadOrders(), loadEmails(), loadNotifications(), loadKafkaEmails(), loadKafkaNotifications(), loadEventSourcingAccounts()])
   .catch((error) => showMessage(error.message, true));
+
+// Dashboard navigation only changes visibility. Existing lab controls, DOM nodes, and API functions remain shared.
+const labRegistry = {
+  overview: { workspace: 'overview', title: 'Lab directory' },
+  commerce: { workspace: 'commerce', title: 'Commerce workflow & Saga' },
+  saga: { workspace: 'commerce', title: 'Saga compensation' },
+  rabbitmq: { workspace: 'rabbitmq', title: 'RabbitMQ' },
+  kafka: { workspace: 'kafka', title: 'Kafka' },
+  gateway: { workspace: 'gateway', title: 'API Gateway' },
+  'rate-limiting': { workspace: 'gateway', title: 'Rate limiting' },
+  circuit: { workspace: 'circuit', title: 'Circuit breaker' },
+  timeouts: { workspace: 'circuit', title: 'Timeouts' },
+  retry: { workspace: 'retry', title: 'Retry' },
+  bulkhead: { workspace: 'bulkhead', title: 'Bulkhead' },
+  'event-sourcing': { workspace: 'event-sourcing', title: 'Event sourcing' },
+  observability: { workspace: 'observability', title: 'Observability' },
+  idempotency: { workspace: 'idempotency', title: 'Idempotency (planned)' },
+  'load-shedding': { workspace: 'load-shedding', title: 'Load shedding (planned)' }
+};
+
+const labViews = [...document.querySelectorAll('[data-lab]')];
+const labLinks = [...document.querySelectorAll('[data-lab-link]')];
+const focusModeToggle = document.querySelector('#focus-mode-toggle');
+
+function getRequestedLab() {
+  const requested = window.location.hash.slice(1);
+  return labRegistry[requested] ? requested : 'overview';
+}
+
+function selectLab(labId, updateHash = true) {
+  const lab = labRegistry[labId] || labRegistry.overview;
+
+  labViews.forEach((view) => {
+    view.hidden = view.dataset.lab !== lab.workspace;
+  });
+
+  labLinks.forEach((link) => {
+    link.classList.toggle('active', (link.dataset.navKey || link.dataset.labLink) === labId);
+  });
+
+  document.title = lab.title + ' - Beyond Microservices Live Labs';
+
+  if (updateHash && window.location.hash !== '#' + labId) {
+    window.location.hash = labId;
+  }
+}
+
+labLinks.forEach((link) => {
+  link.addEventListener('click', () => selectLab(link.dataset.navKey || link.dataset.labLink));
+});
+
+window.addEventListener('hashchange', () => selectLab(getRequestedLab(), false));
+
+function setFocusMode(enabled) {
+  document.body.classList.toggle('focus-mode', enabled);
+  focusModeToggle.setAttribute('aria-pressed', String(enabled));
+  focusModeToggle.textContent = enabled ? 'Exit focus mode' : 'Focus mode';
+}
+
+focusModeToggle.addEventListener('click', () => {
+  setFocusMode(!document.body.classList.contains('focus-mode'));
+});
+
+document.addEventListener('keydown', (event) => {
+  const typingInControl = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
+  if (event.key === 'Escape' && document.body.classList.contains('focus-mode') && !typingInControl) {
+    setFocusMode(false);
+  }
+});
+
+selectLab(getRequestedLab(), false);
