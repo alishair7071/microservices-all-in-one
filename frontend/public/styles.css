@@ -170,6 +170,17 @@ body.focus-mode .focus-toggle { background:#fff; color:var(--teal-dark); border:
 .policy-strip { display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; }
 .policy-strip span { padding:9px 11px; border:1px solid var(--line); border-radius:8px; background:#f8fbf9; color:var(--muted); font-size:12px; }
 .policy-strip strong { color:var(--ink); }
+.circuit-actions { display:flex; flex-wrap:wrap; gap:10px; margin:12px 0; }
+.circuit-actions button { min-height:46px; }
+.danger-action { color:#8d3c2e; background:var(--coral-pale); }
+.danger-action:hover { background:#f8dcd5; }
+.simple-circuit-status { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin:14px 0; }
+.simple-circuit-status div { padding:15px; border:1px solid var(--line); border-radius:10px; background:#f8fbf9; }
+.simple-circuit-status span,.simple-circuit-status strong { display:block; }
+.simple-circuit-status span { margin-bottom:5px; color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.05em; }
+.simple-circuit-status strong { color:var(--teal-dark); font-size:22px; }
+.load-shedding-summary { grid-template-columns:repeat(6,minmax(0,1fr)); }
+.load-shedding-slots { grid-template-columns:repeat(3,minmax(0,1fr)); margin:14px 0 20px; }
 
 .retry-timeline { display:grid; max-width:760px; gap:0; margin-top:15px; }
 .retry-step { display:flex; align-items:center; gap:14px; padding:14px; border:1px solid var(--line); border-radius:11px; background:#f8fbf9; }
@@ -221,5 +232,5 @@ body.focus-mode .focus-toggle { background:#fff; color:var(--teal-dark); border:
 .bulkhead-request.error { border-color:#edc2b9; background:var(--coral-pale); }
 .bulkhead-request.error > span { color:#8d3c2e; background:#f8dcd5; }
 .bulkhead-request small { color:var(--muted); line-height:1.35; }
-@media (max-width:1000px) { .resilience-metrics { grid-template-columns:repeat(3,minmax(0,1fr)); } .bulkhead-request-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
-@media (max-width:760px) { .circuit-machine { grid-template-columns:1fr; } .circuit-machine > b { transform:rotate(90deg); } .bulkhead-pools,.bulkhead-request-grid { grid-template-columns:1fr; } }
+@media (max-width:1000px) { .resilience-metrics { grid-template-columns:repeat(3,minmax(0,1fr)); } .bulkhead-request-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .load-shedding-summary { grid-template-columns:repeat(3,minmax(0,1fr)); } }
+@media (max-width:760px) { .circuit-machine { grid-template-columns:1fr; } .circuit-machine > b { transform:rotate(90deg); } .bulkhead-pools,.bulkhead-request-grid,.simple-circuit-status,.load-shedding-slots { grid-template-columns:1fr; } }

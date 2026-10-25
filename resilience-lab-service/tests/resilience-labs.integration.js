@@ -63,20 +63,21 @@ async function testCircuit() {
     assert.equal(result.status, 502);
   }
   assert.equal(result.body.breaker.state, 'OPEN');
+  assert.equal(result.body.breaker.consecutiveFailures, 3);
   const contactsBeforeReject = result.body.breaker.downstreamContacts;
   const rejected = await request('/circuit-breaker-demo?mode=failing');
   assert.equal(rejected.status, 503);
   assert.equal(rejected.body.breaker.lastCall.targetContacted, false);
   assert.equal(rejected.body.breaker.downstreamContacts, contactsBeforeReject);
 
-  const deadline = Date.now() + 17000;
+  const deadline = Date.now() + 12000;
   let status;
   do {
     await sleep(250);
     status = await request('/circuit-breaker-demo/status');
   } while (status.body.breaker.state !== 'HALF_OPEN' && Date.now() < deadline);
   assert.equal(status.body.breaker.state, 'HALF_OPEN');
-  const recovered = await request('/circuit-breaker-demo?mode=recovered');
+  const recovered = await request('/circuit-breaker-demo?mode=healthy');
   assert.equal(recovered.status, 200);
   assert.equal(recovered.body.breaker.state, 'CLOSED');
   console.log('Circuit: healthy, timeout, OPEN rejection, HALF-OPEN probe, recovery, and reset passed');
@@ -107,6 +108,28 @@ async function testBulkhead() {
   console.log('Bulkhead: 2 admitted, 3 rejected, capacity released, and independent payment pool passed');
 }
 
+async function testLoadShedding() {
+  let result = await request('/load-shedding-demo/reset', { method: 'POST' });
+  assert.equal(result.status, 200);
+  const runId = Date.now();
+  const calls = Array.from({ length: 10 }, (_, index) => request(`/load-shedding-demo?request=burst-${runId}-${index + 1}`));
+  await sleep(250);
+  const during = await request('/load-shedding-demo/status');
+  assert.equal(during.body.safeCapacity, 3);
+  assert.equal(during.body.active, 3);
+  const results = await Promise.all(calls);
+  assert.equal(results.filter(value => value.status === 200).length, 3);
+  assert.equal(results.filter(value => value.status === 503).length, 7);
+  assert.ok(results.filter(value => value.status === 503).every(value => value.body.executed === false));
+  const final = await request('/load-shedding-demo/status');
+  assert.equal(final.body.active, 0);
+  assert.equal(final.body.completed, 3);
+  assert.equal(final.body.shed, 7);
+  const recovered = await request(`/load-shedding-demo?request=recovered-${runId}`);
+  assert.equal(recovered.status, 200);
+  console.log('Load shedding: 3 admitted, 7 shed, capacity released, and later request accepted');
+}
+
 async function testRegressions() {
   assert.equal((await fetch('http://localhost:3000/')).status, 200);
   assert.equal((await fetch(gateway + '/orders')).status, 200);
@@ -114,7 +137,7 @@ async function testRegressions() {
   console.log('Regression: frontend, Saga order route, and Idempotency route reachable');
 }
 
-Promise.resolve().then(testRetry).then(testCircuit).then(testBulkhead).then(testRegressions).catch(error => {
+Promise.resolve().then(testRetry).then(testCircuit).then(testBulkhead).then(testLoadShedding).then(testRegressions).catch(error => {
   console.error(error);
   process.exitCode = 1;
 });

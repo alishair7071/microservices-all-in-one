@@ -142,6 +142,16 @@ services:
           limit_by: ip
           hide_client_headers: false
 
+  # This route deliberately bypasses the rate-limit demo. It exercises only the
+  # Resilience Lab Service's local admission-control demonstration.
+  - name: load-shedding-demo
+    url: http://resilience-lab-service.service.consul:4020/load-shedding
+    routes:
+      - name: load-shedding-demo
+        paths:
+          - /api/load-shedding-demo
+        strip_path: true
+
 upstreams:
   - name: email-service-upstream
     algorithm: round-robin

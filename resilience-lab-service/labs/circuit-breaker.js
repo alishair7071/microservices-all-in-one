@@ -4,8 +4,9 @@ const { randomUUID } = require('crypto');
 
 const router = express.Router();
 const TIMEOUT_MS = 3000;
-const RESET_TIMEOUT_MS = 15000;
-const modes = new Set(['healthy', 'slow', 'failing', 'recovered']);
+const RESET_TIMEOUT_MS = 10000;
+const FAILURES_TO_OPEN = 3;
+const modes = new Set(['healthy', 'slow', 'failing']);
 let breaker;
 let activeFires = 0;
 let downstreamContacts = 0;
@@ -13,6 +14,7 @@ let lastEvent = 'Circuit breaker is ready in CLOSED state.';
 let lastEventAt = new Date().toISOString();
 let nextProbeAt = null;
 let lastCall = null;
+let consecutiveFailures = 0;
 
 function recordEvent(message) {
   lastEvent = message;
@@ -27,10 +29,10 @@ function createBreaker() {
     const body = await response.json();
     if (!response.ok) throw new Error(body.error || 'Target request failed');
     return body;
-  }, { timeout: TIMEOUT_MS, errorThresholdPercentage: 50, volumeThreshold: 3, resetTimeout: RESET_TIMEOUT_MS });
+  }, { timeout: TIMEOUT_MS, errorThresholdPercentage: 100, volumeThreshold: 3, resetTimeout: RESET_TIMEOUT_MS });
   instance.on('open', () => {
     nextProbeAt = new Date(Date.now() + RESET_TIMEOUT_MS).toISOString();
-    recordEvent('OPEN: failure policy reached; normal calls now fail fast.');
+    recordEvent(`OPEN: ${FAILURES_TO_OPEN} consecutive failures reached; normal calls now fail fast.`);
   });
   instance.on('halfOpen', () => { nextProbeAt = null; recordEvent('HALF-OPEN: one recovery probe is permitted.'); });
   instance.on('close', () => { nextProbeAt = null; recordEvent('CLOSED: a successful recovery probe restored normal calls.'); });
@@ -47,7 +49,7 @@ function getStatus() {
     state: breaker.opened ? 'OPEN' : breaker.halfOpen ? 'HALF_OPEN' : 'CLOSED',
     lastEvent, lastEventAt, nextProbeAt,
     timeoutMs: TIMEOUT_MS, resetAfterMs: RESET_TIMEOUT_MS,
-    failureThresholdPercentage: 50, minimumRequestVolume: 3,
+    failuresToOpen: FAILURES_TO_OPEN, consecutiveFailures,
     totalRequests: stats.fires, successfulRequests: stats.successes,
     failedRequests: stats.failures, rejectedRequests: stats.rejects,
     timedOutRequests: stats.timeouts, downstreamContacts,
@@ -60,17 +62,26 @@ router.get('/', async (request, response) => {
   if (mode !== 'healthy' && process.env.RESILIENCE_LABS_ENABLED !== 'true') return response.sendStatus(404);
   const context = { mode, requestId: randomUUID(), targetContacted: false };
   const startedAt = Date.now();
+  const wasHalfOpen = breaker.halfOpen;
   activeFires++;
   try {
     const result = await breaker.fire(context);
     lastCall = { requestId: context.requestId, mode, outcome: 'SUCCESS', targetContacted: context.targetContacted,
       durationMs: Date.now() - startedAt };
+    consecutiveFailures = 0;
+    recordEvent(wasHalfOpen ? 'CLOSED: successful HALF-OPEN probe restored normal calls.'
+      : 'Successful request: consecutive failure count reset to 0.');
     return response.json({ success: true, result, breaker: getStatus() });
   } catch (error) {
     const isOpen = error.code === 'EOPENBREAKER';
     const isTimeout = error.code === 'ETIMEDOUT';
     lastCall = { requestId: context.requestId, mode, outcome: isOpen ? 'REJECTED' : isTimeout ? 'TIMED_OUT' : 'FAILED',
       targetContacted: context.targetContacted, durationMs: Date.now() - startedAt };
+    if (!isOpen) {
+      consecutiveFailures++;
+      if (consecutiveFailures >= FAILURES_TO_OPEN && !breaker.opened) breaker.open();
+      if (!breaker.opened) recordEvent(`${consecutiveFailures} of ${FAILURES_TO_OPEN} consecutive failures recorded.`);
+    }
     return response.status(isOpen ? 503 : isTimeout ? 504 : 502).json({
       success: false,
       message: isOpen ? 'Circuit is OPEN: request rejected immediately without contacting the target.'
@@ -91,6 +102,7 @@ router.post('/reset', (_request, response) => {
   breaker.removeAllListeners();
   breaker.shutdown();
   downstreamContacts = 0;
+  consecutiveFailures = 0;
   lastCall = null;
   nextProbeAt = null;
   recordEvent('Circuit breaker reset to a clean CLOSED state.');

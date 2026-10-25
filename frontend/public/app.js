@@ -8,6 +8,7 @@ const gatewayTestResult = document.querySelector('#gateway-test-result');
 const circuitBreakerResult = document.querySelector('#circuit-breaker-result');
 const retryDemoResult = document.querySelector('#retry-demo-result');
 const bulkheadDemoResult = document.querySelector('#bulkhead-demo-result');
+const loadSheddingResult = document.querySelector('#load-shedding-result');
 const otelTraceResult = document.querySelector('#otel-trace-result');
 const eventAccountSelect = document.querySelector('#event-account-select');
 const eventAccountAmount = document.querySelector('#event-account-amount');
@@ -208,6 +209,73 @@ async function restoreCircuitTarget() {
   }
 }
 
+const simpleCircuit = { pollTimer: null };
+function setSimpleCircuitBusy(busy) {
+  ['send-circuit-success', 'send-circuit-slow', 'send-circuit-failure', 'reset-circuit-demo'].forEach(id => {
+    document.getElementById(id).disabled = busy;
+  });
+}
+function renderSimpleCircuit(breaker, message, isError = false) {
+  if (!breaker) return;
+  document.getElementById('circuit-failure-count').textContent = `${breaker.consecutiveFailures || 0} / ${breaker.failuresToOpen || 3}`;
+  document.getElementById('circuit-state-label').textContent = breaker.state.replace('_', '-');
+  const seconds = breaker.nextProbeAt ? Math.max(0, Math.ceil((new Date(breaker.nextProbeAt).getTime() - Date.now()) / 1000)) : null;
+  document.getElementById('circuit-countdown').textContent = breaker.state === 'OPEN' ? `${seconds} seconds remaining`
+    : breaker.state === 'HALF_OPEN' ? 'Ready: send success' : 'Ready';
+  document.querySelectorAll('.lab-view[data-lab="circuit"] > .circuit-machine [data-circuit-state]').forEach(node => {
+    node.classList.toggle('active', node.dataset.circuitState === breaker.state);
+  });
+  const values = { 'circuit-total': breaker.totalRequests, 'circuit-success': breaker.successfulRequests,
+    'circuit-failed': breaker.failedRequests, 'circuit-timeouts': breaker.timedOutRequests,
+    'circuit-rejected': breaker.rejectedRequests, 'circuit-contacts': breaker.downstreamContacts };
+  Object.entries(values).forEach(([id, value]) => { document.getElementById(id).textContent = value ?? 0; });
+  const contacted = breaker.lastCall ? (breaker.lastCall.targetContacted ? 'Target contacted.' : 'Target was not contacted.') : 'No request sent yet.';
+  circuitBreakerResult.innerHTML = `<div class="gateway-result ${isError ? 'error' : ''}"><strong>${escapeHtml(message || breaker.lastEvent)}</strong><span>${escapeHtml(contacted)}</span></div>`;
+}
+async function readSimpleCircuit() {
+  const response = await fetch('http://localhost:8000/api/circuit-breaker-demo/status', { cache: 'no-store' });
+  const data = await response.json();
+  renderSimpleCircuit(data.breaker);
+  return data.breaker;
+}
+function startSimpleCircuitCountdown() {
+  if (simpleCircuit.pollTimer) clearInterval(simpleCircuit.pollTimer);
+  simpleCircuit.pollTimer = setInterval(async () => {
+    try {
+      const breaker = await readSimpleCircuit();
+      if (breaker.state !== 'OPEN') {
+        clearInterval(simpleCircuit.pollTimer);
+        simpleCircuit.pollTimer = null;
+      }
+    } catch (_) {}
+  }, 250);
+}
+async function sendSimpleCircuit(mode) {
+  setSimpleCircuitBusy(true);
+  try {
+    const response = await fetch(`http://localhost:8000/api/circuit-breaker-demo?mode=${mode}`, { cache: 'no-store' });
+    const data = await response.json();
+    renderSimpleCircuit(data.breaker, data.result?.message || data.message, !response.ok);
+    document.getElementById('circuit-message').textContent = data.result?.message || data.message || 'Request completed.';
+    if (data.breaker.state === 'OPEN') startSimpleCircuitCountdown();
+  } catch (error) {
+    document.getElementById('circuit-message').textContent = error.message;
+  } finally { setSimpleCircuitBusy(false); }
+}
+async function resetSimpleCircuit() {
+  setSimpleCircuitBusy(true);
+  try {
+    const response = await fetch('http://localhost:8000/api/circuit-breaker-demo/reset', { method: 'POST' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Reset failed.');
+    if (simpleCircuit.pollTimer) clearInterval(simpleCircuit.pollTimer);
+    simpleCircuit.pollTimer = null;
+    renderSimpleCircuit(data.breaker, 'Reset complete. Send any of the three request types.');
+    document.getElementById('circuit-message').textContent = 'Breaker reset to CLOSED and failure counter reset to 0 / 3.';
+  } catch (error) { document.getElementById('circuit-message').textContent = error.message; }
+  finally { setSimpleCircuitBusy(false); }
+}
+
 const bulkheadRun = { running: false, requests: [], pools: null, pollTimer: null };
 function renderBulkhead() {
   ['recommendation', 'payment'].forEach(poolKey => {
@@ -280,6 +348,89 @@ async function runBulkheadDemo() {
     bulkheadRun.pollTimer = null; bulkheadRun.running = false;
     document.getElementById('send-bulkhead-requests').disabled = false;
     document.getElementById('reset-bulkhead-demo').disabled = false;
+  }
+}
+
+const loadSheddingRun = { running: false, requests: [], status: null, pollTimer: null };
+function renderLoadShedding() {
+  const status = loadSheddingRun.status || { safeCapacity: 3, active: 0, available: 3, admitted: 0, shed: 0, completed: 0, activeRequests: [] };
+  document.getElementById('load-safe-capacity').textContent = status.safeCapacity;
+  document.getElementById('load-active').textContent = status.active;
+  document.getElementById('load-available').textContent = status.available;
+  document.getElementById('load-admitted').textContent = status.admitted;
+  document.getElementById('load-shed').textContent = status.shed;
+  document.getElementById('load-completed').textContent = status.completed;
+  document.getElementById('load-capacity-slots').innerHTML = Array.from({ length: status.safeCapacity }, (_, index) => {
+    const active = status.activeRequests.find(request => request.slot === index + 1) || status.activeRequests[index];
+    return `<div class="bulkhead-slot ${active ? 'occupied' : ''}"><strong>Capacity ${index + 1}</strong><span>${active ? `${escapeHtml(active.requestId)} · Processing` : 'Available'}</span></div>`;
+  }).join('');
+  loadSheddingResult.innerHTML = loadSheddingRun.requests.length ? loadSheddingRun.requests.map(request => {
+    const css = request.state === 'shed' || request.state === 'failed' ? 'error' : request.state;
+    return `<div class="bulkhead-request ${css}"><strong>${escapeHtml(request.label)}</strong><span>${escapeHtml(request.state.toUpperCase())}</span><small>${escapeHtml(request.detail)}</small></div>`;
+  }).join('') : emptyState('Run the controlled burst to see three operations admitted and excess work shed.');
+}
+async function pollLoadSheddingStatus() {
+  const response = await fetch('http://localhost:8000/api/load-shedding-demo/status', { cache: 'no-store' });
+  const data = await response.json();
+  loadSheddingRun.status = data;
+  loadSheddingRun.requests.forEach(request => {
+    if (data.activeRequests.some(active => active.requestId === request.id) && request.state === 'waiting') {
+      request.state = 'processing';
+      request.detail = 'Admitted: executing bounded work.';
+    }
+  });
+  renderLoadShedding();
+  return data;
+}
+async function callLoadShedding(request) {
+  try {
+    const response = await fetch(`http://localhost:8000/api/load-shedding-demo?request=${encodeURIComponent(request.id)}`, { cache: 'no-store' });
+    const data = await response.json();
+    request.state = response.ok ? 'completed' : response.status === 503 ? 'shed' : 'failed';
+    request.detail = data.message || `HTTP ${response.status}`;
+    loadSheddingRun.status = data.status || loadSheddingRun.status;
+  } catch (error) {
+    request.state = 'failed';
+    request.detail = error.message;
+  }
+  renderLoadShedding();
+}
+async function resetLoadShedding(showMessage = true) {
+  if (loadSheddingRun.running) return;
+  const response = await fetch('http://localhost:8000/api/load-shedding-demo/reset', { method: 'POST' });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'Load-shedding reset failed.');
+  loadSheddingRun.status = data.status;
+  loadSheddingRun.requests = [];
+  renderLoadShedding();
+  if (showMessage) document.getElementById('load-shedding-message').textContent = 'Counters reset. All three safe capacity slots are available.';
+}
+async function runLoadSheddingDemo() {
+  if (loadSheddingRun.running) return;
+  const runButton = document.getElementById('send-load-shedding-burst');
+  const resetButton = document.getElementById('reset-load-shedding-demo');
+  runButton.disabled = true;
+  resetButton.disabled = true;
+  try {
+    await resetLoadShedding(false);
+    loadSheddingRun.running = true;
+    const runId = Date.now();
+    loadSheddingRun.requests = Array.from({ length: 10 }, (_, index) => ({ id: `burst-${runId}-${index + 1}`,
+      label: `Request ${index + 1}`, state: 'waiting', detail: 'Sent to the service for an admission decision.' }));
+    renderLoadShedding();
+    document.getElementById('load-shedding-message').textContent = 'Ten simultaneous requests sent. Only safe capacity is admitted; excess is rejected immediately.';
+    loadSheddingRun.pollTimer = setInterval(() => pollLoadSheddingStatus().catch(() => {}), 120);
+    await Promise.all(loadSheddingRun.requests.map(callLoadShedding));
+    await pollLoadSheddingStatus();
+    document.getElementById('load-shedding-message').textContent = 'Run complete: admitted work finished; shed requests never started the simulated operation.';
+  } catch (error) {
+    document.getElementById('load-shedding-message').textContent = error.message;
+  } finally {
+    if (loadSheddingRun.pollTimer) clearInterval(loadSheddingRun.pollTimer);
+    loadSheddingRun.pollTimer = null;
+    loadSheddingRun.running = false;
+    runButton.disabled = false;
+    resetButton.disabled = false;
   }
 }
 
@@ -432,23 +583,18 @@ async function testLoadBalancing() {
 async function testRateLimit() {
   try {
     const response = await fetch('http://localhost:8000/api/rate-limit-test');
-    const data = await response.json();
-    const limit = response.headers.get('X-RateLimit-Limit-Minute') || '5';
-    const remaining = response.headers.get('X-RateLimit-Remaining-Minute');
-
+    const data = await response.json().catch(() => ({}));
+    const limit = response.headers.get('RateLimit-Limit-Minute') || response.headers.get('X-RateLimit-Limit-Minute') || '5';
+    const remaining = response.headers.get('RateLimit-Remaining-Minute') || response.headers.get('X-RateLimit-Remaining-Minute');
+    const retryAfter = response.headers.get('Retry-After');
     if (!response.ok) {
-      showGatewayTestResult(
-        `Rate limit blocked the request (${response.status})`,
-        `Kong allows ${limit} requests per minute on this test route. Wait one minute and try again.`,
-        true
-      );
+      showGatewayTestResult(`Rate limit blocked the request (${response.status})`,
+        retryAfter ? `Kong allows ${limit} requests per minute. Retry after about ${retryAfter} seconds.`
+          : data.message || `Kong allows ${limit} requests per minute. Wait for the quota window to reset.`, true);
       return;
     }
-
-    showGatewayTestResult(
-      'Rate-limited request accepted',
-      `Kong allowed this request. Remaining this minute: ${remaining ?? 'unknown'} of ${limit}.`
-    );
+    showGatewayTestResult('Rate-limited request accepted',
+      `Kong allowed this request. Remaining this minute: ${remaining ?? 'unknown'} of ${limit}.`);
   } catch (error) {
     showGatewayTestResult('Rate-limit request failed', error.message, true);
   }
@@ -768,14 +914,23 @@ document.querySelector('#test-rate-limit').addEventListener('click', testRateLim
 document.querySelector('#send-circuit-request').addEventListener('click', runCircuitBreakerDemo);
 document.querySelector('#trigger-circuit-failures').addEventListener('click', triggerCircuitFailures);
 document.querySelector('#restore-circuit-target').addEventListener('click', restoreCircuitTarget);
-document.querySelector('#reset-circuit-demo').addEventListener('click', resetCircuitDemo);
 document.querySelector('#send-retry-request').addEventListener('click', runRetryDemo);
 document.querySelector('#send-bulkhead-requests').addEventListener('click', runBulkheadDemo);
 document.querySelector('#reset-bulkhead-demo').addEventListener('click', () => resetBulkheadDemo().catch(error => {
   document.getElementById('bulkhead-message').textContent = error.message;
 }));
+document.querySelector('#send-load-shedding-burst').addEventListener('click', runLoadSheddingDemo);
+document.querySelector('#reset-load-shedding-demo').addEventListener('click', () => resetLoadShedding().catch(error => {
+  document.getElementById('load-shedding-message').textContent = error.message;
+}));
 readCircuitStatus().catch(() => {});
+document.querySelector('#send-circuit-success').addEventListener('click', () => sendSimpleCircuit('healthy'));
+document.querySelector('#send-circuit-slow').addEventListener('click', () => sendSimpleCircuit('slow'));
+document.querySelector('#send-circuit-failure').addEventListener('click', () => sendSimpleCircuit('failing'));
+document.querySelector('#reset-circuit-demo').addEventListener('click', resetSimpleCircuit);
+readSimpleCircuit().catch(() => {});
 renderBulkhead();
+pollLoadSheddingStatus().catch(() => renderLoadShedding());
 document.querySelector('#send-otel-trace').addEventListener('click', runOtelTraceDemo);
 document.querySelector('#open-demo-account').addEventListener('click', openEventSourcingAccount);
 document.querySelector('#event-account-select').addEventListener('change', loadEventSourcingAccount);
@@ -801,7 +956,7 @@ const labRegistry = {
   'event-sourcing': { workspace: 'event-sourcing', title: 'Event sourcing' },
   observability: { workspace: 'observability', title: 'Observability' },
   idempotency: { workspace: 'idempotency', title: 'Idempotency' },
-  'load-shedding': { workspace: 'load-shedding', title: 'Load shedding (planned)' }
+  'load-shedding': { workspace: 'load-shedding', title: 'Load shedding' }
 };
 
 const labViews = [...document.querySelectorAll('[data-lab]')];

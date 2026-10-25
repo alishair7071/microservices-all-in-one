@@ -7,6 +7,7 @@ app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'resilience-
 app.use('/circuit-breaker', require('./labs/circuit-breaker'));
 app.use('/retry', require('./labs/retry'));
 app.use('/bulkhead', require('./labs/bulkhead'));
+app.use('/load-shedding', require('./labs/load-shedding'));
 app.use('/trace-demo', require('./labs/trace-demo'));
 
 startService(app, 'resilience-lab-service', 4020)
