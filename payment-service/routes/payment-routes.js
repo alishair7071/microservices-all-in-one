@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const { randomUUID } = require('crypto');
 const Payment = require('../models/payment');
 const { publishPaymentApproved } = require('../kafka/kafka-producer');
@@ -6,6 +6,14 @@ const { publishPaymentApproved } = require('../kafka/kafka-producer');
 const router = express.Router();
 
 router.post('/charge', async (req, res) => {
+  if (req.body.simulatePaymentFailure === true) {
+    return res.status(422).json({
+      success: false,
+      code: 'SIMULATED_PAYMENT_DECLINED',
+      error: 'Payment was deliberately declined for the local Saga demonstration.'
+    });
+  }
+
   try {
     const transactionId = randomUUID();
     const payment = await Payment.create({

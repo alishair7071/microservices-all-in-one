@@ -87,7 +87,7 @@
         <section class="lab-view" data-lab="commerce" hidden>
           <div class="workspace-hero">
             <div class="lab-kicker"><span>Data &amp; Consistency</span><span>Challenge B → Solution B</span></div>
-            <h2>Commerce workflow &amp; Saga compensation</h2>
+            <h2>Saga ? Payment Failure and Inventory Compensation</h2>
             <p>Order creation calls Inventory, reserves stock through gRPC, then saves the order. The existing checkbox simulates a failure after stock reservation so the Order Service asks Inventory to restore it.</p>
           </div>
           <div class="explanation-grid">
@@ -122,7 +122,7 @@
               </form>
             </section>
           </div>
-          <section class="panel results-panel"><div class="panel-heading"><div><h3>Workflow results</h3><p class="subtle">Created orders can be paid using the existing Payment Service flow.</p></div></div><div id="orders" class="collection" aria-live="polite"></div></section>
+          <section class="panel results-panel"><div class="panel-heading"><div><h3>Saga results and payment</h3><p class="subtle">Pay a created order. This local setting triggers a confirmed decline after stock was reserved.</p></div></div><label class="check-label"><input id="simulate-payment-failure" type="checkbox"> Payment mode: simulate confirmed payment failure (local Saga demo)</label><div id="saga-timeline" class="collection" aria-live="polite"></div><div id="orders" class="collection" aria-live="polite"></div></section>
           <details class="technical-details"><summary>Technical details</summary><p>Browser → Kong → Order Service → Inventory REST and gRPC. Successful order creation publishes the existing OrderCreated event.</p></details>
         </section>
 

@@ -1,4 +1,4 @@
-const grpc = require('@grpc/grpc-js');
+﻿const grpc = require('@grpc/grpc-js');
 const protoLoader = require('@grpc/proto-loader');
 const path = require('path');
 const { grpcPort } = require('../config');
@@ -11,12 +11,12 @@ const packageDefinition = protoLoader.loadSync(
 const inventoryGrpc = grpc.loadPackageDefinition(packageDefinition).inventory;
 
 function reduceStockGrpc(call, callback) {
-  reduceStock(call.request.product_id, call.request.quantity)
+  reduceStock(call.request.product_id, call.request.quantity, call.request.reservation_id)
     .then((result) => callback(null, result));
 }
 
 function restoreStockGrpc(call, callback) {
-  restoreStock(call.request.product_id, call.request.quantity)
+  restoreStock(call.request.product_id, call.request.quantity, call.request.reservation_id)
     .then((result) => callback(null, result));
 }
 
@@ -39,3 +39,4 @@ function startGrpcServer() {
 }
 
 module.exports = { startGrpcServer };
+

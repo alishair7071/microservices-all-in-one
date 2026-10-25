@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+﻿const mongoose = require('mongoose');
 
 module.exports = mongoose.model('Order', new mongoose.Schema({
   productId: String,
@@ -7,5 +7,12 @@ module.exports = mongoose.model('Order', new mongoose.Schema({
   customerName: String,
   userEmail: String,
   status: String,
+  reservationId: String,
+  saga: {
+    paymentOutcome: String,
+    compensation: String,
+    message: String,
+    updatedAt: Date
+  },
   createdAt: Date
 }));

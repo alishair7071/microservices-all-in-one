@@ -1,4 +1,4 @@
-const grpc = require('@grpc/grpc-js');
+﻿const grpc = require('@grpc/grpc-js');
 const protoLoader = require('@grpc/proto-loader');
 const path = require('path');
 const { inventoryGrpcAddress } = require('../config');
@@ -13,22 +13,23 @@ const inventoryClient = new inventoryGrpc.InventoryService(
   grpc.credentials.createInsecure()
 );
 
-function reduceStock(productId, quantity) {
+function reduceStock(productId, quantity, reservationId) {
   return new Promise((resolve, reject) => {
     inventoryClient.ReduceStock(
-      { product_id: productId, quantity },
+      { product_id: productId, quantity, reservation_id: reservationId },
       (error, response) => error ? reject(error) : resolve(response)
     );
   });
 }
 
-function restoreStock(productId, quantity) {
+function restoreStock(productId, quantity, reservationId) {
   return new Promise((resolve, reject) => {
     inventoryClient.RestoreStock(
-      { product_id: productId, quantity },
+      { product_id: productId, quantity, reservation_id: reservationId },
       (error, response) => error ? reject(error) : resolve(response)
     );
   });
 }
 
 module.exports = { reduceStock, restoreStock };
+

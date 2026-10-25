@@ -3,6 +3,7 @@ const productsList = document.querySelector('#products');
 const productSelect = document.querySelector('#product-id');
 const ordersList = document.querySelector('#orders');
 const message = document.querySelector('#message');
+const sagaTimeline = document.querySelector('#saga-timeline');
 const gatewayTestResult = document.querySelector('#gateway-test-result');
 const circuitBreakerResult = document.querySelector('#circuit-breaker-result');
 const retryDemoResult = document.querySelector('#retry-demo-result');
@@ -598,12 +599,17 @@ ordersList.addEventListener('click', async (event) => {
 
   try {
     const response = await fetch(`http://localhost:8000/api/orders/${orderId}/pay`, {
-      method: 'POST'
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ simulatePaymentFailure: document.querySelector('#simulate-payment-failure').checked })
     });
     const result = await response.json();
+    if (!response.ok && result.saga) sagaTimeline.innerHTML = '<div class="gateway-result error"><strong>' + escapeHtml(result.error) + '</strong><span>Order created -> Inventory reserved -> Payment attempted -> Payment failed -> Compensation requested -> ' + (result.saga.stockRestored ? 'Inventory restored -> order compensated' : 'Inventory restoration pending') + '</span><span>Final order status: ' + escapeHtml(result.order?.status || 'unknown') + '</span></div>';
+    if (!response.ok && result.saga) await Promise.all([loadProducts(), loadOrders()]);
     if (!response.ok) throw new Error(result.error || 'Could not pay for order');
 
     showMessage(`Payment successful. Transaction: ${result.transactionId}`);
+    sagaTimeline.innerHTML = '<div class="gateway-result"><strong>Payment succeeded - Order completed</strong><span>Inventory reservation remains committed. Final order status: ' + escapeHtml(result.order.status) + '.</span></div>';
     await new Promise((resolve) => setTimeout(resolve, 500));
     await Promise.all([loadOrders(), loadEmails(), loadNotifications(), loadKafkaEmails(), loadKafkaNotifications()]);
   } catch (error) {
