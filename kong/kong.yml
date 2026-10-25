@@ -18,6 +18,14 @@ services:
           - /api/orders
         strip_path: true
 
+  - name: idempotency-lab
+    url: http://payment-service.service.consul:4002/idempotency-lab
+    routes:
+      - name: idempotency-lab
+        paths:
+          - /api/idempotency-lab
+        strip_path: true
+
   - name: account-service
     url: http://account-service.service.consul:4006/accounts
     routes:

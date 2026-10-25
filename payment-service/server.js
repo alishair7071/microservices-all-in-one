@@ -5,12 +5,14 @@ const config = require('./config');
 const paymentRoutes = require('./routes/payment-routes');
 const { connectKafka } = require('./kafka/kafka-producer');
 const { startService } = require('./consul-registration');
+const idempotencyLabRoutes = require('./routes/idempotency-lab-routes');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'payment-service' }));
 app.use(paymentRoutes);
+app.use(idempotencyLabRoutes);
 
 async function start() {
   await mongoose.connect(config.mongoUri);
