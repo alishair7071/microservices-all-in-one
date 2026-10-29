@@ -1,103 +1,239 @@
-# Microservices Demo
+# Beyond Microservices — Live Labs
 
-A small project for learning how services communicate. Run it with:
+An educational microservices project for the Dev Weekends technical talk, **Beyond Microservices: Real Engineering Challenges**. It turns distributed-systems concepts into local, repeatable experiments: each lab has a real request path, a controlled condition, and a visible result in the browser.
 
-```bash
-docker compose up --build
+The project is for learning and demonstrations. Payments, balances, failures, and traffic conditions are simulated; they are not production financial or traffic-management systems.
+
+## Architecture
+
+Browser traffic enters through Kong. Services register with Consul and use its DNS names for internal HTTP discovery. MongoDB stores service data, while RabbitMQ and Kafka demonstrate two messaging styles.
+
+```mermaid
+flowchart LR
+  Browser[Browser / Frontend] --> Kong[Kong API Gateway]
+  Kong --> Inventory[Inventory Service]
+  Kong --> Order[Order Service]
+  Kong --> Payment[Payment Service]
+  Kong --> Account[Account Service]
+  Kong --> Labs[Resilience Lab Service]
+  Kong --> EmailA[Email Service A]
+  Kong --> EmailB[Email Service B]
+  Kong --> Notification[Notification Service]
+
+  Order -->|gRPC reserve / restore stock| Inventory
+  Order -->|HTTP payment request| Payment
+  Order -->|OrderCreated| RabbitMQ[(RabbitMQ)]
+  RabbitMQ --> EmailA
+  RabbitMQ --> EmailB
+  RabbitMQ --> Notification
+  Payment -->|PaymentApproved| Kafka[(Kafka)]
+  Kafka --> EmailA
+  Kafka --> EmailB
+  Kafka --> Notification
+  Labs -->|controlled dependency calls| Target[Resilience Target Service]
+
+  Inventory --> Mongo[(MongoDB)]
+  Order --> Mongo
+  Payment --> Mongo
+  Account --> Mongo
+  Consul[Consul] -. service registration and DNS .-> Inventory
+  Consul -.-> Order
+  Consul -.-> Payment
+  Consul -.-> Account
+  Consul -.-> Labs
 ```
 
-Open the frontend at `http://localhost:3000`. Browser requests go through Kong at `http://localhost:8000/api`.
+### Services
 
-## Services and request flow
-
-| Service | What it does |
+| Component | Responsibility |
 | --- | --- |
-| Inventory | Stores products in MongoDB; exposes REST and a gRPC stock operation. |
-| Order | Creates orders, calls Inventory and Payment, and publishes an `OrderCreated` RabbitMQ event. |
-| Payment | Saves payments and publishes a `PaymentApproved` Kafka event. |
-| Email A/B | Consume RabbitMQ and Kafka messages. |
-| Notification | Consumes RabbitMQ and Kafka messages. |
-| Resilience Lab | Runs the circuit breaker, timeout, retry, and bulkhead examples. |
-| Resilience Target | Provides simple responses for the labs to call. |
-| Account | Demonstrates event sourcing by rebuilding account balances from an immutable event history. |
-| Kong | Routes frontend requests to the services; also demonstrates load balancing and rate limiting. |
+| Frontend | Structured Labs Dashboard and Focus Mode at port 3000. |
+| Kong | Public `/api/...` routing, Email Service load balancing, and a local rate-limit policy. |
+| Consul | Local service registration, health checks, and DNS discovery. |
+| Inventory Service | Product API, MongoDB catalog, and gRPC stock reservation/restoration. |
+| Order Service | Order workflow, Saga coordination, RabbitMQ `OrderCreated` publisher. |
+| Payment Service | Simulated charges, MongoDB payment records, Kafka `PaymentApproved` publisher, and idempotency lab. |
+| Email Service A / B | Competing RabbitMQ consumers and Kafka email consumer-group members. |
+| Notification Service | Independent RabbitMQ and Kafka consumer. |
+| Account Service | Event-sourced simulated accounts rebuilt from MongoDB events. |
+| Resilience Lab Service | Retry, circuit breaker, bulkhead, and load-shedding experiments. |
+| Resilience Target Service | Controlled healthy, slow, and failing responses for resilience and tracing labs. |
+| Prometheus, Grafana, Loki, Promtail | Local metrics and log tools for the trace demonstration. |
 
-The main order flow is:
+## Technology stack
+
+- Node.js and Express
+- MongoDB and Mongoose
+- gRPC with Protocol Buffers
+- RabbitMQ and Kafka
+- Kong Gateway and Consul
+- OpenTelemetry, Prometheus, Grafana, Loki, Promtail, and an external Jaeger instance
+- Docker Compose
+
+## Getting started
+
+### Prerequisites
+
+- Docker Desktop with Docker Compose v2
+- At least 6 GB of Docker memory is recommended because Kafka, MongoDB, observability tools, and services run together.
+
+### Start the stack
+
+```powershell
+docker compose up -d --build
+docker compose ps
+```
+
+| URL | Purpose |
+| --- | --- |
+| <http://localhost:3000> | Live Labs dashboard |
+| <http://localhost:8000> | Kong proxy; browser API calls use `/api/...` |
+| <http://localhost:8500> | Consul UI |
+| <http://localhost:15672> | RabbitMQ Management UI (`admin` / `admin`, local development only) |
+| <http://localhost:9090> | Prometheus |
+| <http://localhost:3001> | Grafana (`admin` / `admin`, local development only) |
+| <http://localhost:16686> | Jaeger UI when a compatible local Jaeger instance is running |
+
+Stop the stack with:
+
+```powershell
+docker compose down
+```
+
+Named volumes survive `docker compose down`. Use `docker compose down -v` only when you intentionally want to delete MongoDB and observability data.
+
+### Configuration notes
+
+- `RESILIENCE_LABS_ENABLED=true` enables controlled local resilience endpoints.
+- `IDEMPOTENCY_LAB_ENABLED=true` enables the local payment idempotency lab.
+- Kong reads [kong/kong.yml](kong/kong.yml) during startup. Restart or recreate Kong after changing that file.
+- Jaeger is not started by this Compose file. The tracing services export OTLP data to their configured host endpoint.
+
+## Labs overview
+
+| Area | Lab | Observable behavior | Status |
+| --- | --- | --- | --- |
+| Communication | API Gateway | Kong routing and Email Service round-robin load balancing | Implemented |
+| Communication | RabbitMQ | `OrderCreated` routing and competing email consumers | Implemented |
+| Communication | Kafka | `PaymentApproved`, consumer groups, and independent consumers | Implemented |
+| Data consistency | Saga | Inventory compensation after a controlled order/payment failure | Implemented |
+| Data consistency | Idempotency | Lost response, duplicate effect risk, and idempotency-key reuse | Implemented |
+| Resilience | Retry | Bounded attempts with exponential backoff and jitter | Implemented |
+| Resilience | Circuit breaker and timeout | Three failures open the breaker; a recovery probe closes it | Implemented |
+| Resilience | Bulkhead | Separate caller-side capacity pools for different dependencies | Implemented |
+| Resilience | Rate limiting | Kong policy of five requests per minute per client IP | Implemented |
+| Resilience | Load shedding | Three active operations allowed; excess receives `503` | Implemented |
+| Additional | Event sourcing | Immutable account events, ledger, replay, reconstructed balance | Implemented |
+| Observability | Traces, logs, metrics | OpenTelemetry trace demo, structured logs, Prometheus and Grafana | Implemented |
+
+## Running the labs
+
+### Commerce, Saga, RabbitMQ, and Kafka
+
+1. Open **Commerce workflow** and add a product.
+2. Create an order. Inventory is queried over HTTP and stock is reserved through gRPC.
+3. Open **RabbitMQ** to see `OrderCreated` consumers.
+4. Pay a pending order, then open **Kafka** to see `PaymentApproved` consumers.
+5. For Saga compensation, select the controlled failure checkbox before creating an order. Stock is restored after the failure.
+
+### Idempotency
+
+Open **Idempotency**, create a dummy account, choose protection on or off, send a payment while losing the response, and retry the same logical payment. Compare saved effects and remaining balance. This lab is isolated from normal checkout payments.
+
+### Retry
+
+Choose temporary, persistent, or permanent failure and run the experiment. The timeline shows actual target responses, exponential backoff, jitter, and the final outcome. Only transient `503` and network failures are retried.
+
+### Circuit breaker and timeout
+
+Reset the lab, then send three deliberate failures or three slow requests. Slow target calls take five seconds but time out after three seconds in the caller. At three failures the breaker opens for ten seconds and rejects calls before contacting the target. After the countdown, send a successful request as the HALF-OPEN recovery probe.
+
+### Bulkhead
+
+Click **Send 5 Recommendations + 1 Payment**. The Lab Service allows two slow recommendation calls and one separate simulated payment call. Extra recommendation calls receive `503`, while payment retains its own slot.
+
+### Rate limiting
+
+Open **Rate limiting** in the API Gateway workspace and click **Send Rate-Limit Request** repeatedly. Kong accepts up to five requests in its current one-minute IP window and then returns `429`. The screen displays the real remaining quota or retry time when Kong supplies it.
+
+### Load shedding
+
+Click **Send 10 Simultaneous Requests**. The Lab Service admits three operations and sheds the rest with `503` before they start. Once admitted operations finish, capacity becomes available again. This is a local fixed concurrency threshold, not adaptive CPU-based shedding.
+
+### Event sourcing
+
+1. Open **Event sourcing** and click **Open Demo Account**.
+2. Deposit `100`, withdraw `30`, then deposit `50`.
+3. The balance becomes `USD 120.00`; the ledger shows each persisted event, sequence, amount, timestamp, version, and resulting balance.
+4. Click **Replay Events**. The browser reads the stored events in sequence order and rebuilds the balance from zero.
+5. The final panel compares the reconstructed value with the Account Service value. Replay performs no writes.
+
+### Observability
+
+Use **Observability** to send a normal or controlled-failure trace. Search Jaeger for `resilience-lab-service` and `POST /trace-demo`. Open the supplied Grafana dashboards for trace-demo metrics and logs. Health checks are excluded from the custom trace-demo metrics.
+
+## Focus Mode and presentation use
+
+Choose a lab from the left navigation. The URL hash identifies the workspace, so `http://localhost:3000/#event-sourcing` opens Event Sourcing directly. **Focus mode** hides the sidebar for projector use without reloading a lab, changing state, or issuing duplicate requests. Press `Escape` to leave Focus Mode.
+
+## Reliability boundaries and limitations
+
+- Money, payments, and account balances are simulated data.
+- Saga failures and resilience failures are controlled local scenarios.
+- Account events are append-only through the application API. A unique `(accountId, sequence)` index preserves ordered event streams.
+- The browser Event Sourcing lab supplies a client command ID. Retrying that same ID returns the existing saved event. Legacy API callers may omit it, but then a repeated HTTP request is a new command and has no duplicate-effect protection. Different simultaneous commands can conflict on the current version; one may receive `409` and should be refreshed/retried deliberately.
+- Event sourcing replays the entire stream on reads. It has no snapshots and is intended for small learning histories.
+- Bulkhead and load-shedding counters are in-memory limits for one Lab Service instance, not distributed coordination across replicas.
+- Kong rate limiting uses local in-memory storage and client IP, not a shared multi-gateway production quota.
+- Docker Compose is a local topology, not a production deployment, service mesh, or Kubernetes configuration.
+- Jaeger is external to this Compose file. Prometheus, Grafana, Loki, and Promtail are included locally.
+
+## Development and testing
+
+Rebuild only services affected by a change:
+
+```powershell
+docker compose up -d --build --no-deps account-service frontend
+```
+
+Run focused integration tests against the local gateway:
+
+```powershell
+node account-service/tests/event-sourcing.integration.js
+node payment-service/tests/idempotency-lab.integration.js
+node resilience-lab-service/tests/resilience-labs.integration.js
+```
+
+Tests create local demo records and do not delete existing MongoDB data. Syntax checks:
+
+```powershell
+node --check frontend/public/app.js
+node --check account-service/routes/account-routes.js
+```
+
+## Project structure
 
 ```text
-Frontend -> Kong -> Order -> Inventory (product REST lookup, then gRPC stock reduction)
-                         -> MongoDB (save order)
-                         -> RabbitMQ (OrderCreated event)
-
-Frontend -> Kong -> Order -> Payment -> MongoDB (save payment)
-                                    -> Kafka (PaymentApproved event)
+frontend/                    Dashboard UI and Focus Mode
+kong/                        Declarative Kong routes and rate-limit policy
+account-service/             Event store, replay rules, Account API
+inventory-service/           Product API and stock gRPC server
+order-service/               Order workflow, Saga coordinator, RabbitMQ publisher
+payment-service/             Charges, Kafka publisher, idempotency lab
+email-service/               RabbitMQ and Kafka email consumers
+notification-service/        RabbitMQ and Kafka notification consumer
+resilience-lab-service/      Retry, circuit breaker, bulkhead, load shedding
+resilience-target-service/   Controlled downstream responses and trace target
+observability/               Prometheus, Grafana, Loki, Promtail configuration
+proto/                       Inventory gRPC contract
+shared/                      Service registration, logs, metrics helpers
+docker-compose.yml           Local multi-container topology
 ```
 
-## Where to look in the code
+## Useful source locations
 
-- `*/server.js` starts each HTTP service.
-- `*/routes/` contains the HTTP paths and their handlers. Express combines the path in `app.use('/orders', orderRoutes)` with a route's `router.post('/')` to make `POST /orders`.
-- `*/models/` contains MongoDB schemas.
-- `*/grpc/`, `*/messaging/`, and `*/kafka/` contain the corresponding communication code.
-- `resilience-lab-service/labs/circuit-breaker.js` contains the Opossum breaker and its route.
-- `resilience-lab-service/labs/retry.js` contains the retry loop and its route.
-- `resilience-lab-service/labs/bulkhead.js` limits how many lab requests can call the target at the same time.
-- `proto/inventory.proto` defines Inventory's stock reservation and restoration gRPC operations.
-- `resilience-target-service/server.js` returns the simulated normal, slow, or temporary failure responses.
-- `account-service/events/` stores and replays the account event history for the Event Sourcing Lab.
-- `kong/kong.yml` maps public `/api/...` paths to service paths.
-- `frontend/public/app.js` sends browser requests to Kong and renders the results.
-
-## Circuit breaker and timeout lab
-
-The frontend has one **Send Protected Request** button. The request travels through Kong and the Resilience Lab Service to the Resilience Target Service.
-
-- **Normal response:** returns JSON immediately.
-- **Slow response:** waits 5 seconds; the Resilience Lab Service breaker times out after 3 seconds.
-- **Unavailable service:** run `docker compose stop resilience-target-service`, then click the button repeatedly. After three failures, the circuit opens and rejects requests immediately. Run `docker compose start resilience-target-service`, wait 15 seconds, and click again to test recovery.
-
-The breaker lives in the Resilience Lab Service.
-
-## Saga lab
-
-Order creation reserves stock through Inventory, then saves the order in Order Service. Select **Simulate order-save failure after stock is reserved (Saga demo)** in the order form to fail between those steps. Order Service then calls Inventory to restore the stock. The order is not created, and the frontend refreshes the product stock. The Saga coordinator is `order-service/routes/order-routes.js`; the compensation is implemented by Inventory's `RestoreStock` gRPC operation. RabbitMQ publishing keeps its existing behavior and happens after the database steps succeed.
-
-## Bulkhead lab
-
-Click **Send 5 Concurrent Requests**. The Resilience Lab Service permits two requests at a time to call the Resilience Target Service, which takes five seconds to respond. The other three requests are rejected immediately with HTTP 503. The limit is in `resilience-lab-service/labs/bulkhead.js`.
-
-## Event Sourcing lab
-
-Open a demo account, then deposit or withdraw money. Each accepted command appends an immutable event to the `account_events` collection in the `account_db` database. The displayed balance is rebuilt by replaying those events; the lab also shows the ordered event history. Amounts are stored as integer cents. This is simulated money and is separate from the Payment Service.
-
-## Retry lab
-
-Click **Send Retry Request** once in the frontend. The Resilience Lab Service makes a safe GET request to the Resilience Target Service. The target returns `503` for attempts 1 and 2, then `200` for attempt 3. The lab waits `200–300 ms` and `400–500 ms` between attempts (exponential backoff plus jitter). The frontend shows every attempt, wait, and the final result. The retry logic is in `resilience-lab-service/labs/retry.js`.
-
-## OpenTelemetry tracing lab
-
-Click **Send Traced Request** to make a request through the Lab Service, Target Service, and MongoDB. Both Node services preload `@opentelemetry/auto-instrumentations-node/register` from their `npm start` scripts. Environment variables in their Dockerfiles set the service names and OTLP endpoint. The package automatically creates spans for HTTP, Express, Undici `fetch`, and MongoDB; the route handlers do not create spans. In Jaeger, search for service `resilience-lab-service` and operation `POST /trace-demo` to exclude health-check traces. Automatic instrumentation does not add a trace ID to the browser response. Jaeger runs separately from this Compose stack at `localhost:16686`, and the services export to `host.docker.internal:4318` by default.
-
-Select **Simulate a failure in Target Service before the MongoDB insert** to make MongoDB reject an invalid query. The Target responds with HTTP 503 and the Lab responds with HTTP 502. Automatic instrumentation may mark the failed MongoDB operation and the HTTP 5xx spans as errors. The failure does not insert a MongoDB record.
-
-The tracing lab writes structured manual request logs. Every line has `logType: "manual"`, a descriptive `message`, and the same `traceId` across both services. In Jaeger, open a `/trace-demo` trace and expand its Lab and Target spans to see the matching messages under **Events** (called **Logs** in some Jaeger versions). These are span events attached to the trace; Jaeger is not the central store for the container logs.
-
-## Centralized logging lab
-
-Loki stores the application logs, Promtail collects the Docker container output and sends it to Loki, and Grafana reads the stored logs. Open the [Trace Demo Logs dashboard](http://localhost:3001/d/trace-demo-logs/trace-demo-logs) in Grafana after sending a traced request. It shows only manual logs from the Lab and Target services.
-
-To investigate manually, open Grafana **Explore**, choose the **Loki** data source, and run:
-
-```logql
-{service=~"resilience-(lab|target)-service", log_type="manual"} | json
-```
-
-The `service` and `level` labels are safe for filtering. The trace ID stays inside the JSON log line instead of becoming a Loki label, because a different trace ID for every request would create too many labels. Copy a `traceId` from a log line and use it in Jaeger's **Lookup by Trace ID** field to move from the log to the complete request trace.
-
-## OpenTelemetry metrics lab
-
-The same Lab and Target services export OpenTelemetry metrics to Prometheus every 2 seconds. Prometheus receives them through its OTLP HTTP endpoint, while traces continue to Jaeger. Open the [Trace Demo Metrics dashboard](http://localhost:3001/d/trace-demo-metrics/trace-demo-metrics) in Grafana (initial local login: `admin` / `admin`), or query Prometheus at <http://localhost:9090>. The learning dashboard starts with four panels: completed requests, failed requests, p95 duration, and request rate.
-
-The custom request counter and duration histogram are recorded only for `POST /trace-demo`, so Docker's `/health` checks do not appear in these panels. Send normal and failed requests from the frontend, then wait for the next metrics export. The `job` label distinguishes Lab from Target. The **Failed requests** panel counts all responses with status 500 or above, including unexpected application errors. The p95 panel uses the last minute of duration data. Prometheus stores trends across requests; Jaeger remains the place to inspect a single request trace.
-
-To practice with an unexpected JavaScript error, temporarily change `mongoClient.connect()` to `mongoClient.connectx()` inside `resilience-target-service/trace-demo.js`. Rebuild and start the service with `docker compose up -d --build --no-deps resilience-target-service`, then send a normal traced request. Target returns 500 and Lab returns 502; both services' failed-request counters increase, while the MongoDB error counter does not. Restore the original method name and rebuild the service afterward. A syntax error or a broken import that prevents a service from starting cannot be recorded by that service's in-process metrics; inspect `docker compose logs resilience-target-service` for those failures.
+- [Account command routes](account-service/routes/account-routes.js)
+- [Account replay rules](account-service/events/replay-account.js)
+- [Kong routes](kong/kong.yml)
+- [Resilience labs](resilience-lab-service/labs)
+- [Dashboard application code](frontend/public/app.js)

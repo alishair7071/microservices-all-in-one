@@ -61,6 +61,8 @@ router.get('/:accountId', async (req, res) => {
 router.post('/:accountId/:operation', async (req, res) => {
   const { accountId, operation } = req.params;
   const amountCents = req.body.amountCents;
+  const requestedCommandId = typeof req.body.commandId === 'string' ? req.body.commandId.trim() : '';
+  const commandId = requestedCommandId || randomUUID();
 
   if (!['deposit', 'withdraw'].includes(operation)) {
     return res.status(404).json({ error: 'Account operation not found' });
@@ -68,8 +70,15 @@ router.post('/:accountId/:operation', async (req, res) => {
   if (!Number.isSafeInteger(amountCents) || amountCents <= 0) {
     return res.status(400).json({ error: 'Amount must be a positive whole number of cents' });
   }
+  if (commandId.length > 100) {
+    return res.status(400).json({ error: 'commandId must be 100 characters or fewer' });
+  }
 
   try {
+    const existingEvent = await AccountEvent.findOne({ accountId, commandId }).lean();
+    if (existingEvent) {
+      return res.json({ event: existingEvent, account: replayAccount(await getAccountEvents(accountId)), reused: true });
+    }
     const events = await getAccountEvents(accountId);
     const account = replayAccount(events);
     if (!account) return res.status(404).json({ error: 'Account not found' });
@@ -84,6 +93,7 @@ router.post('/:accountId/:operation', async (req, res) => {
     const event = await AccountEvent.create({
       accountId,
       sequence: account.version + 1,
+      commandId,
       type: operation === 'deposit' ? 'MoneyDeposited' : 'MoneyWithdrawn',
       amountCents,
       currency: account.currency
@@ -93,6 +103,10 @@ router.post('/:accountId/:operation', async (req, res) => {
     return res.status(201).json({ event, account: updatedAccount });
   } catch (error) {
     if (error.code === 11000) {
+      const existingEvent = await AccountEvent.findOne({ accountId, commandId }).lean();
+      if (existingEvent) {
+        return res.json({ event: existingEvent, account: replayAccount(await getAccountEvents(accountId)), reused: true });
+      }
       return res.status(409).json({ error: 'Another account command was saved at the same time. Refresh and try again.' });
     }
     return res.status(500).json({ error: `Could not record account event: ${error.message}` });

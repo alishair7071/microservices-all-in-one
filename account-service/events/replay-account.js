@@ -14,8 +14,12 @@ function replayAccount(events) {
       throw new Error('Account event sequence is incomplete.');
     }
 
+    if (account.version === 0 && event.type !== 'AccountOpened') {
+      throw new Error('AccountOpened must be the first event.');
+    }
     if (event.type === 'AccountOpened') {
       if (event.sequence !== 1) throw new Error('AccountOpened must be the first event.');
+      if (event.amountCents !== 0) throw new Error('AccountOpened must not change the balance.');
       account.currency = event.currency;
     } else if (event.type === 'MoneyDeposited') {
       account.balanceCents += event.amountCents;

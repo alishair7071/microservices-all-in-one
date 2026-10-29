@@ -15,6 +15,8 @@ const eventAccountAmount = document.querySelector('#event-account-amount');
 const eventAccountMessage = document.querySelector('#event-account-message');
 const eventAccountSummary = document.querySelector('#event-account-summary');
 const eventAccountHistory = document.querySelector('#event-account-history');
+const eventReplayResult = document.querySelector('#event-replay-result');
+const eventSourcingState = { account: null, events: [], busy: false, replaying: false };
 
 function escapeHtml(value) {
   return String(value)
@@ -458,41 +460,70 @@ async function runOtelTraceDemo() {
   }
 }
 
-function formatAccountMoney(amountCents) {
-  return `USD ${(amountCents / 100).toFixed(2)}`;
+function formatAccountMoney(amountCents, currency = 'USD') {
+  return `${currency} ${(amountCents / 100).toFixed(2)}`;
+}
+
+function setEventSourcingBusy(busy) {
+  eventSourcingState.busy = busy;
+  ['open-demo-account', 'event-account-select', 'event-account-amount', 'deposit-account-money', 'withdraw-account-money', 'replay-account-events']
+    .forEach(id => { document.getElementById(id).disabled = busy; });
+}
+
+function applyEventToBalance(balanceCents, event) {
+  if (event.type === 'MoneyDeposited') return balanceCents + event.amountCents;
+  if (event.type === 'MoneyWithdrawn') return balanceCents - event.amountCents;
+  return balanceCents;
+}
+
+function eventDescription(event) {
+  if (event.type === 'AccountOpened') return 'Account opened with a zero balance';
+  return event.type === 'MoneyDeposited' ? `Deposited ${formatAccountMoney(event.amountCents, event.currency)}`
+    : `Withdrew ${formatAccountMoney(event.amountCents, event.currency)}`;
+}
+
+function renderEventHistory(events, currency = 'USD') {
+  let balanceCents = 0;
+  eventAccountHistory.innerHTML = events.length ? events.map(event => {
+    balanceCents = applyEventToBalance(balanceCents, event);
+    const kind = event.type === 'MoneyDeposited' ? 'deposit' : event.type === 'MoneyWithdrawn' ? 'withdrawal' : 'opened';
+    return `<article class="event-ledger-row ${kind}"><div class="event-sequence">${escapeHtml(event.sequence)}</div><div><strong>${escapeHtml(event.type)}</strong><span>${escapeHtml(eventDescription(event))}</span></div><div><span>Occurred</span><strong>${escapeHtml(formatTimestamp(event.occurredAt))}</strong></div><div><span>Balance after</span><strong>${escapeHtml(formatAccountMoney(balanceCents, event.currency || currency))}</strong></div><div><span>Version</span><strong>v${escapeHtml(event.sequence)}</strong></div></article>`;
+  }).join('') : emptyState('This account has no persisted events.');
+}
+
+function renderEventSourcingAccount() {
+  const account = eventSourcingState.account;
+  if (!account) {
+    eventAccountSummary.innerHTML = emptyState('Open a demo account to begin.');
+    eventAccountHistory.innerHTML = '';
+    eventReplayResult.innerHTML = emptyState('Select or open an account, then replay its persisted events.');
+    return;
+  }
+  eventAccountSummary.innerHTML = `<div class="gateway-result"><strong>Current balance: ${escapeHtml(formatAccountMoney(account.balanceCents, account.currency))}</strong><span>Derived from ${escapeHtml(account.version)} immutable event(s) · Account ${escapeHtml(account.accountId)}</span></div>`;
+  renderEventHistory(eventSourcingState.events, account.currency);
+  if (!eventSourcingState.replaying) eventReplayResult.innerHTML = emptyState('Click Replay Events to rebuild this balance from the saved ledger.');
 }
 
 async function loadEventSourcingAccount() {
   const accountId = eventAccountSelect.value;
   if (!accountId) {
-    eventAccountSummary.innerHTML = emptyState('Open a demo account to begin.');
-    eventAccountHistory.innerHTML = '';
+    eventSourcingState.account = null;
+    eventSourcingState.events = [];
+    renderEventSourcingAccount();
     return;
   }
-
   try {
     const [accountResponse, eventsResponse] = await Promise.all([
-      fetch(`http://localhost:8000/api/accounts/${accountId}`),
-      fetch(`http://localhost:8000/api/accounts/${accountId}/events`)
+      fetch(`http://localhost:8000/api/accounts/${accountId}`, { cache: 'no-store' }),
+      fetch(`http://localhost:8000/api/accounts/${accountId}/events`, { cache: 'no-store' })
     ]);
     const accountData = await accountResponse.json();
     const eventsData = await eventsResponse.json();
     if (!accountResponse.ok) throw new Error(accountData.error || 'Could not load account');
     if (!eventsResponse.ok) throw new Error(eventsData.error || 'Could not load account history');
-
-    const account = accountData.account;
-    eventAccountSummary.innerHTML = `
-      <div class="gateway-result">
-        <strong>Current balance: ${escapeHtml(formatAccountMoney(account.balanceCents))}</strong>
-        <span>Rebuilt from ${escapeHtml(account.version)} event(s) · Account ${escapeHtml(account.accountId)}</span>
-      </div>
-    `;
-    eventAccountHistory.innerHTML = eventsData.events.map((event) => `
-      <div class="gateway-result">
-        <strong>#${escapeHtml(event.sequence)} · ${escapeHtml(event.type)}</strong>
-        <span>${escapeHtml(event.type === 'AccountOpened' ? 'Account opened' : formatAccountMoney(event.amountCents))} · ${escapeHtml(formatTimestamp(event.occurredAt))}</span>
-      </div>
-    `).join('');
+    eventSourcingState.account = accountData.account;
+    eventSourcingState.events = eventsData.events;
+    renderEventSourcingAccount();
   } catch (error) {
     eventAccountSummary.innerHTML = `<div class="gateway-result error">${escapeHtml(error.message)}</div>`;
   }
@@ -500,18 +531,13 @@ async function loadEventSourcingAccount() {
 
 async function loadEventSourcingAccounts(preferredAccountId = '') {
   try {
-    const response = await fetch('http://localhost:8000/api/accounts');
+    const response = await fetch('http://localhost:8000/api/accounts', { cache: 'no-store' });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Could not load accounts');
-
     const oldAccountId = eventAccountSelect.value;
-    eventAccountSelect.innerHTML = data.accounts.map((account) => `
-      <option value="${escapeHtml(account.accountId)}">${escapeHtml(account.accountId.slice(0, 8))} · ${escapeHtml(formatAccountMoney(account.balanceCents))}</option>
-    `).join('');
+    eventAccountSelect.innerHTML = data.accounts.map(account => `<option value="${escapeHtml(account.accountId)}">${escapeHtml(account.accountId.slice(0, 8))} · ${escapeHtml(formatAccountMoney(account.balanceCents, account.currency))}</option>`).join('');
     eventAccountSelect.value = preferredAccountId || oldAccountId;
-    if (!eventAccountSelect.value && data.accounts.length > 0) {
-      eventAccountSelect.value = data.accounts[0].accountId;
-    }
+    if (!eventAccountSelect.value && data.accounts.length) eventAccountSelect.value = data.accounts[0].accountId;
     await loadEventSourcingAccount();
   } catch (error) {
     eventAccountSummary.innerHTML = `<div class="gateway-result error">${escapeHtml(error.message)}</div>`;
@@ -519,17 +545,18 @@ async function loadEventSourcingAccounts(preferredAccountId = '') {
 }
 
 async function openEventSourcingAccount() {
+  setEventSourcingBusy(true);
   try {
     const response = await fetch('http://localhost:8000/api/accounts', { method: 'POST' });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Could not open account');
     await loadEventSourcingAccounts(data.account.accountId);
-    eventAccountMessage.textContent = 'Demo account opened; AccountOpened was appended to the event history.';
+    eventAccountMessage.textContent = 'Demo account opened. AccountOpened is now the first immutable event.';
     eventAccountMessage.className = 'message';
   } catch (error) {
     eventAccountMessage.textContent = error.message;
     eventAccountMessage.className = 'message error';
-  }
+  } finally { setEventSourcingBusy(false); }
 }
 
 async function changeEventSourcingBalance(operation) {
@@ -546,22 +573,48 @@ async function changeEventSourcingBalance(operation) {
     eventAccountMessage.className = 'message error';
     return;
   }
-
+  setEventSourcingBusy(true);
   try {
     const response = await fetch(`http://localhost:8000/api/accounts/${accountId}/${operation}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amountCents })
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amountCents, commandId: crypto.randomUUID() })
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || `Could not ${operation} money`);
     await loadEventSourcingAccounts(accountId);
     eventAccountAmount.value = '';
-    eventAccountMessage.textContent = `${data.event.type} appended. Current balance: ${formatAccountMoney(data.account.balanceCents)}.`;
+    eventAccountMessage.textContent = `${data.reused ? 'Existing command reused' : data.event.type + ' appended'}. Current balance: ${formatAccountMoney(data.account.balanceCents, data.account.currency)}.`;
     eventAccountMessage.className = 'message';
   } catch (error) {
     eventAccountMessage.textContent = error.message;
     eventAccountMessage.className = 'message error';
+  } finally { setEventSourcingBusy(false); }
+}
+
+async function replayEventSourcingAccount() {
+  const accountId = eventAccountSelect.value;
+  if (!accountId || eventSourcingState.replaying) return;
+  setEventSourcingBusy(true);
+  eventSourcingState.replaying = true;
+  try {
+    await loadEventSourcingAccount();
+    const { account, events } = eventSourcingState;
+    let runningBalance = 0;
+    eventReplayResult.innerHTML = `<div class="replay-opening"><strong>Initial balance: ${escapeHtml(formatAccountMoney(0, account.currency))}</strong><span>Reading ${escapeHtml(events.length)} persisted event(s) in sequence order.</span></div>`;
+    for (const event of events) {
+      runningBalance = applyEventToBalance(runningBalance, event);
+      eventReplayResult.insertAdjacentHTML('beforeend', `<div class="replay-step ${event.type === 'MoneyDeposited' ? 'deposit' : event.type === 'MoneyWithdrawn' ? 'withdrawal' : 'opened'}"><span>Event ${escapeHtml(event.sequence)}</span><div><strong>${escapeHtml(event.type)}</strong><small>${escapeHtml(eventDescription(event))}</small></div><b>${escapeHtml(formatAccountMoney(runningBalance, event.currency || account.currency))}</b></div>`);
+      await new Promise(resolve => setTimeout(resolve, 650));
+    }
+    const matches = runningBalance === account.balanceCents;
+    eventReplayResult.insertAdjacentHTML('beforeend', `<div class="replay-final ${matches ? 'match' : 'mismatch'}"><strong>${matches ? 'Match confirmed' : 'Mismatch detected'}</strong><span>Reconstructed: ${escapeHtml(formatAccountMoney(runningBalance, account.currency))} · Service balance: ${escapeHtml(formatAccountMoney(account.balanceCents, account.currency))}</span></div>`);
+    eventAccountMessage.textContent = matches ? 'Replay completed. The reconstructed balance matches Account Service.' : 'Replay completed, but the values did not match.';
+    eventAccountMessage.className = matches ? 'message' : 'message error';
+  } catch (error) {
+    eventReplayResult.innerHTML = `<div class="gateway-result error">${escapeHtml(error.message)}</div>`;
+  } finally {
+    eventSourcingState.replaying = false;
+    setEventSourcingBusy(false);
   }
 }
 
@@ -936,6 +989,7 @@ document.querySelector('#open-demo-account').addEventListener('click', openEvent
 document.querySelector('#event-account-select').addEventListener('change', loadEventSourcingAccount);
 document.querySelector('#deposit-account-money').addEventListener('click', () => changeEventSourcingBalance('deposit'));
 document.querySelector('#withdraw-account-money').addEventListener('click', () => changeEventSourcingBalance('withdraw'));
+document.querySelector('#replay-account-events').addEventListener('click', replayEventSourcingAccount);
 
 Promise.all([loadProducts(), loadOrders(), loadEmails(), loadNotifications(), loadKafkaEmails(), loadKafkaNotifications(), loadEventSourcingAccounts()])
   .catch((error) => showMessage(error.message, true));
